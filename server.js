@@ -11,7 +11,6 @@ app.use(express.static(__dirname));
 let users = {};
 
 io.on("connection", (socket) => {
-
     socket.on("join", (username) => {
         users[socket.id] = username;
         io.emit("users", users);
