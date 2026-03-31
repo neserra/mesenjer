@@ -1,18 +1,17 @@
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
-const cors = require("cors");
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-app.use(express.static(__dirname)); 
-// 👆 это отдаёт index.html автоматически
+app.use(express.static(__dirname));
 
 let users = {};
 
 io.on("connection", (socket) => {
+
     socket.on("join", (username) => {
         users[socket.id] = username;
         io.emit("users", users);
@@ -29,16 +28,14 @@ io.on("connection", (socket) => {
         }
     });
 
-    socket.on("signal", (data) => {
-        io.to(data.toSocket).emit("signal", data);
-    });
-
     socket.on("disconnect", () => {
         delete users[socket.id];
         io.emit("users", users);
     });
 });
 
-server.listen(3000, () => {
-    console.log("Server running http://localhost:3000");
+const PORT = process.env.PORT || 3000;
+
+server.listen(PORT, "0.0.0.0", () => {
+    console.log("Server running on", PORT);
 });
