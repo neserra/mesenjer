@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Messenger</title>
+
+<style>
+body {
+    margin: 0;
+    font-family: Arial;
+    background: #0d0d0d;
+    color: white;
+    display: flex;
+    height: 100vh;
+}
+
+/* USERS */
+.sidebar {
+    width: 260px;
+    background: #151515;
+    padding: 10px;
+    overflow-y: auto;
+}
+
+.user {
+    padding: 8px;
+    margin: 5px 0;
+    background: #222;
+    cursor: pointer;
+    border-radius: 5px;
+}
+
+/* CHAT */
+.chat {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.messages {
+    flex: 1;
+    padding: 10px;
+    overflow-y: auto;
+}
+
+.input-box {
+    display: flex;
+}
+
+input {
+    flex: 1;
+    padding: 12px;
+    border: none;
+    background: #1f1f1f;
+    color: white;
+}
+
+button {
+    padding: 12px;
+    background: #2b2b2b;
+    color: white;
+    border: none;
+    cursor: pointer;
+}
+
+button:hover {
+    background: #3a3a3a;
+}
+
+/* CALL UI */
+.call {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: #1a1a1a;
+    padding: 10px;
+    border-radius: 10px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="sidebar">
+    <h3>Пользователи</h3>
+    <div id="users"></div>
+</div>
+
+<div class="chat">
+    <div class="messages" id="messages"></div>
+
+    <div class="input-box">
+        <input id="msg" placeholder="Сообщение..." />
+        <button onclick="sendMessage()">Отправить</button>
+    </div>
+</div>
+
+<div class="call">
+    <button onclick="startCall()">📞 Call</button>
+</div>
+
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+<script>
+const socket = io("http://localhost:3000");
+
+let username = prompt("Введите имя:");
+socket.emit("join", username);
+
+let selectedUser = null;
+let selectedSocket = null;
+
+// USERS LIST
+socket.on("users", (users) => {
+    const box = document.getElementById("users");
+    box.innerHTML = "";
+
+    Object.entries(users).forEach(([id, name]) => {
+        if (name === username) return;
+
+        const div = document.createElement("div");
+        div.className = "user";
+        div.innerText = name;
+
+        div.onclick = () => {
+            selectedUser = name;
+            selectedSocket = id;
+            addMsg("🔵 Выбрано: " + name);
+        };
+
+        box.appendChild(div);
+    });
+});
+
+// MESSAGES
+socket.on("private_message", (data) => {
+    addMsg(data.from + ": " + data.message);
+});
+
+function sendMessage() {
+    const text = document.getElementById("msg").value;
+    if (!selectedUser) return alert("Выбери пользователя!");
+
+    socket.emit("private_message", {
+        to: selectedUser,
+        message: text
+    });
+
+    addMsg("Me: " + text);
+    document.getElementById("msg").value = "";
+}
+
+function addMsg(text) {
+    const div = document.createElement("div");
+    div.innerText = text;
+    document.getElementById("messages").appendChild(div);
+}
+
+// =========================
+// 📞 CALL (WebRTC SIGNAL)
+// =========================
+
+let peerConnection;
+let localStream;
+
+async function startCall() {
+    if (!selectedSocket) {
+        alert("Выбери пользователя для звонка!");
+        return;
+    }
+
+    localStream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: true
+    });
+
+    peerConnection = new RTCPeerConnection();
+
+    localStream.getTracks().forEach(track => {
+        peerConnection.addTrack(track, localStream);
+    });
+
+    peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+            socket.emit("signal", {
+                toSocket: selectedSocket,
+                data: event.candidate
+            });
+        }
+    };
+
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+
+    // 📡 ОТПРАВКА ОФФЕРА
+    socket.emit("signal", {
+        toSocket: selectedSocket,
+        data: offer
+    });
+
+    addMsg("📞 Звонок начат...");
+}
+
+// RECEIVE SIGNAL
+socket.on("signal", async (data) => {
+    console.log("signal:", data);
+
+    if (data.type === "offer") {
+        peerConnection = new RTCPeerConnection();
+
+        peerConnection.ontrack = (event) => {
+            const audio = document.createElement("audio");
+            audio.srcObject = event.streams[0];
+            audio.autoplay = true;
+            document.body.appendChild(audio);
+        };
+
+        await peerConnection.setRemoteDescription(data.data);
+
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+
+        socket.emit("signal", {
+            toSocket: selectedSocket,
+            data: answer
+        });
+    }
+
+    if (data.type === "answer") {
+        await peerConnection.setRemoteDescription(data.data);
+    }
+
+    if (data.data && data.data.candidate) {
+        try {
+            await peerConnection.addIceCandidate(data.data);
+        } catch (e) {}
+    }
+});
+</script>
+
+</body>
+</html>
